@@ -1,0 +1,5 @@
+(library
+ (name oregex)
+ (public_name oregex)
+ (inline_tests)
+ (preprocess (pps ppx_inline_test)))
