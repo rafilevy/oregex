@@ -134,3 +134,6 @@ let traverse str nfa =
 
 (* Main regex match function takes a regular expression string and a string to see if the string matches *)
 let regex_match expr str = traverse str (regex_to_nfa (compile expr))
+
+(* Matches a string against a regex object *)
+let regex_eval expr str = traverse str (regex_to_nfa expr)
