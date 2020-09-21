@@ -1,7 +1,7 @@
 type regex =
     | Union of regex * regex
     | Concat of regex * regex
-    | Repeat of regex
+    | Repeat of regex * int
     | Char of char
     | Wildcard
     | Empty

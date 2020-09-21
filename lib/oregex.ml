@@ -7,11 +7,13 @@ type parse_unit =
     | Altern
     | Dot
     | Star
+    | Plus
     | Literal of char
 type parse_compound =
     | Group of parse_compound list
     | Altern of parse_compound list * parse_compound list
     | Star of parse_compound
+    | Plus of parse_compound
     | Unit of parse_unit
 exception CompilationException
 exception TraversalException
@@ -20,7 +22,7 @@ exception TraversalException
 type regex =
     | Union of regex * regex
     | Concat of regex * regex
-    | Repeat of regex
+    | Repeat of regex * int
     | Char of char
     | Wildcard
     | Empty
@@ -45,6 +47,7 @@ let compile str =
         | '|' -> Altern
         | '.' -> Dot
         | '*' -> Star
+        | '+' -> Plus
         | c -> Literal(c)
     in let rec split_groups = function
         | [], 0 -> []
@@ -60,29 +63,34 @@ let compile str =
         | Unit(Altern)::xs, acc -> [Altern (List.rev acc, split_alterns (xs, []))]
         | Group(l)::xs, acc -> split_alterns (xs, Group (split_alterns (l, [])) :: acc )
         | x::xs, acc -> split_alterns (xs, x::acc)
-    in let rec apply_star = function
+    in let rec apply_repeat = function
         | [] -> []
         | x::Unit(Star)::xs -> (match x with 
-            | Group(l) -> Star(Group(apply_star l)) :: (apply_star xs)
-            | Altern(l, r) -> Star(Altern(apply_star l, apply_star r)) :: (apply_star xs)
-            | o -> Star(o) :: (apply_star xs))
+            | Group(l) -> Star(Group(apply_repeat l)) :: (apply_repeat xs)
+            | Altern(l, r) -> Star(Altern(apply_repeat l, apply_repeat r)) :: (apply_repeat xs)
+            | o -> Star(o) :: (apply_repeat xs))
+        | x::Unit(Plus)::xs -> (match x with 
+            | Group(l) -> Plus(Group(apply_repeat l)) :: (apply_repeat xs)
+            | Altern(l, r) -> Plus(Altern(apply_repeat l, apply_repeat r)) :: (apply_repeat xs)
+            | o -> Plus(o) :: (apply_repeat xs))
         | x::xs -> (match x with 
-            | Group(l) -> Group(apply_star l) :: (apply_star xs)
-            | Altern(l, r) -> Altern(apply_star l, apply_star r) :: (apply_star xs)
-            | o -> o :: (apply_star xs))
+            | Group(l) -> Group(apply_repeat l) :: (apply_repeat xs)
+            | Altern(l, r) -> Altern(apply_repeat l, apply_repeat r) :: (apply_repeat xs)
+            | o -> o :: (apply_repeat xs))
     in let rec compile_to_regex = 
         let rec convert = function
             | Unit (Literal c) -> Char c
             | Unit (Dot) -> Wildcard
             | Group (l) -> compile_to_regex l
             | Altern (l, r) -> Union(compile_to_regex l, compile_to_regex r)
-            | Star (l) -> Repeat (convert l)
+            | Star (l) -> Repeat (convert l, 0)
+            | Plus (l) -> Repeat (convert l, 1)
             | _ -> raise CompilationException
         in function 
             | [] -> Empty
             | x::[] -> convert x
             | x::xs -> Concat(convert x, compile_to_regex xs)
-    in compile_to_regex ( apply_star ( split_alterns (split_groups (List.map parse_token (explode str) , 0), [])))
+    in compile_to_regex ( apply_repeat ( split_alterns (split_groups (List.map parse_token (explode str) , 0), [])))
 
 (* Converts a regex expression into a FSM which can be traversed *)
 let regex_to_nfa expr = 
@@ -93,44 +101,54 @@ let regex_to_nfa expr =
             ])
         | Empty, e -> fun () -> State( [(Epsilon_T, e)] )
         | Wildcard, e -> fun () -> State( [Wildcard_T, e] )
-        | Char c, e -> fun () -> State( [Char_T (c), e] )
+        | Char (c), e -> fun () -> State( [Char_T (c), e] )
         | Concat (s, t), e -> regex_to_nfa_inner (s, regex_to_nfa_inner (t, e))
-        | Repeat (s), e -> let rec start () = State([
+        | Repeat (s, lb), e -> let rec start k = if k = 0 then
+            State([
                 (Epsilon_T, e);
-                (Epsilon_T, (regex_to_nfa_inner (s, fun () -> State([(Epsilon_T, start ); (Epsilon_T, e)]))) )
-            ]) in start
+                (Epsilon_T, regex_to_nfa_inner (s, fun () -> start 0) )
+            ]) else 
+            State([
+                (Epsilon_T, regex_to_nfa_inner (s, fun () -> start (k-1)) )
+            ]) in (fun () -> start lb)
     in regex_to_nfa_inner (expr, fun () -> End) ()
 
 (* Transition functions *)
 let accepts t c = match (t, c) with
-    | Wildcard_T, _ -> true
+    | Wildcard_T, c -> c <> '\n'
     | Char_T (a), b -> a = b
     | Epsilon_T, _  -> false
 
 (* Traverses a regex NFA with a given string to see if a match is found *)
 let traverse str nfa =
-    let rec advance_state c n = 
-        match (c, n) with 
-        | c, State (
-                (Epsilon_T, f)::[]
-            ) -> advance_state c (f ())
-        | c, State(
-                (t, f)::[]
-            ) -> if accepts t c then [f ()] else [Null]
-        | c, State( 
-                (Epsilon_T, f)::(Epsilon_T, g)::[]
-            ) -> advance_state c (f ()) @ advance_state c (g ())
-        | _, End -> [End]
-        | _, _ -> raise TraversalException
-    in
+    let rec advance_epsilon s = 
+        match s with 
+            | State(ts) -> List.concat (List.map 
+                (function 
+                    | Epsilon_T, f -> advance_epsilon (f())
+                    | k -> [State([k])]
+                ) ts)
+            | End -> [ End ]
+            | Null -> []
+    in let advance c s = 
+        match s with 
+            | State(ts) -> List.concat (List.map 
+                (function 
+                    | Epsilon_T, _ -> raise TraversalException
+                    | t, f -> if accepts t c then [f ()] else [Null]
+                ) ts)
+            | End -> [ End ]
+            | Null -> raise TraversalException
+    in let init_advanced = advance_epsilon nfa in
     let rec traverse_inner = function
         | [], _ -> false
         | c::cs, nfas ->
-            let advanced = List.filter (fun a -> a <> Null) (List.concat (List.map (advance_state c) (nfa::nfas)))
+            let advanced = List.concat (List.map advance_epsilon (List.concat (List.map (advance c) (init_advanced @ nfas))) )
             in 
                 if (List.exists (fun a -> a = End) advanced) then true
                 else traverse_inner (cs, advanced)
-    in traverse_inner ('\r'::(explode str), [])
+    in if List.exists (fun a -> a = End) init_advanced then true
+    else traverse_inner ((explode str), init_advanced)
 
 (* Main regex match function takes a regular expression string and a string to see if the string matches *)
 let regex_match expr str = traverse str (regex_to_nfa (compile expr))
