@@ -1,10 +1,10 @@
 opam-version: "2.0"
-version: "1.0"
+version: "1.1"
 maintainer: "rafi.levy@sky.com"
 authors: ["Rafi Levy"]
-homepage: ""
-bug-reports: ""
-dev-repo: ""
+homepage: "https://github.com/rafilevy/oregex"
+bug-reports: "https://github.com/rafilevy/oregex/issues"
+dev-repo: "https://github.com/rafilevy/oregex"
 license: "MIT"
 build: [
     ["dune" "build" "-p" name "-j" jobs ""]
