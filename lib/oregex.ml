@@ -119,39 +119,34 @@ let accepts t c = match (t, c) with
     | Char_T (a), b -> a = b
     | Epsilon_T, _  -> false
 
-(* Traverses a regex NFA with a given string to see if a match is found *)
+(* Traverses a regex NFA with a given string and accumulates matches *)
 let traverse str nfa =
-    let rec advance_epsilon s = 
+    let rec advance_epsilon (s, acc) = 
         match s with 
             | State(ts) -> List.concat (List.map 
                 (function 
-                    | Epsilon_T, f -> advance_epsilon (f())
-                    | k -> [State([k])]
+                    | Epsilon_T, f -> advance_epsilon (f(), acc)
+                    | k -> [ (State([k]), acc) ]
                 ) ts)
-            | End -> [ End ]
+            | End -> [ (End, acc)]
             | Null -> []
-    in let advance c s = 
+    in let advance c (s, acc) =
         match s with 
             | State(ts) -> List.concat (List.map 
                 (function 
                     | Epsilon_T, _ -> raise TraversalException
-                    | t, f -> if accepts t c then [f ()] else [Null]
+                    | t, f -> if accepts t c then [ (f (), acc ^ (Char.escaped c)) ] else [ (Null, "") ]
                 ) ts)
-            | End -> [ End ]
+            | End -> [ (End, acc) ]
             | Null -> raise TraversalException
-    in let init_advanced = advance_epsilon nfa in
+    in let init_advanced = advance_epsilon (nfa, "") in
     let rec traverse_inner = function
-        | [], _ -> false
-        | c::cs, nfas ->
-            let advanced = List.concat (List.map advance_epsilon (List.concat (List.map (advance c) (init_advanced @ nfas))) )
-            in 
-                if (List.exists (fun a -> a = End) advanced) then true
-                else traverse_inner (cs, advanced)
-    in if List.exists (fun a -> a = End) init_advanced then true
-    else traverse_inner ((explode str), init_advanced)
+        | [], nfas -> List.filter_map (fun (s, acc) -> if s = End then Some(acc) else None) nfas
+        | c::cs, nfas -> traverse_inner ( cs, List.concat (List.map advance_epsilon (List.concat (List.map (advance c) (init_advanced @ nfas)))) )
+    in traverse_inner ((explode str), init_advanced)
 
-(* Main regex match function takes a regular expression string and a string to see if the string matches *)
+(* Takes a regex string and a string to match against and returns a list of matches*)
 let regex_match expr str = traverse str (regex_to_nfa (compile expr))
 
-(* Matches a string against a regex object *)
+(* Takes a regex object and a string to match against and returns a list of matches*)
 let regex_eval expr str = traverse str (regex_to_nfa expr)

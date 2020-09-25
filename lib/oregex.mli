@@ -6,5 +6,5 @@ type regex =
     | Wildcard
     | Empty
 val compile : string -> regex
-val regex_match : string -> string -> bool
-val regex_eval : regex -> string -> bool
+val regex_match : string -> string -> string list
+val regex_eval : regex -> string -> string list
