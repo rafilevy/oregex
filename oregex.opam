@@ -7,5 +7,5 @@ bug-reports: "https://github.com/rafilevy/oregex/issues"
 dev-repo: "https://github.com/rafilevy/oregex"
 license: "MIT"
 build: [
-    ["dune" "build" "-p" name "-j" jobs ""]
+    ["dune" "build" "-p" name]
 ]
