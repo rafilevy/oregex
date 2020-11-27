@@ -1,6 +1,6 @@
 open Utils
 
-(* Intermediate types for string to regex compilation *)
+(* Intermediate types for string -> regex compilation *)
 type parse_unit =
     | StartGroup
     | EndGroup
@@ -33,7 +33,7 @@ type transition =
     | Epsilon_T
     | Char_T of char
 
-(* A finite state machine type to evaluate regex expression with lazily parsed transitions *)
+(* A lazy finite state machine type to evaluate regex expressions *)
 type fsm =
     | State of (transition * (unit -> fsm) ) list
     | End
